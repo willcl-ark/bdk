@@ -83,6 +83,7 @@ pub enum Error {
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
+    BitcoinRpc(bitcoincore_rpc::Error),
 }
 
 impl fmt::Display for Error {
@@ -121,6 +122,7 @@ impl_error!(bitcoin::secp256k1::Error, Secp256k1);
 impl_error!(serde_json::Error, JSON);
 impl_error!(bitcoin::hashes::hex::Error, Hex);
 impl_error!(bitcoin::util::psbt::Error, PSBT);
+impl_error!(bitcoincore_rpc::Error, BitcoinRpc);
 
 #[cfg(feature = "electrum")]
 impl_error!(electrum_client::Error, Electrum);

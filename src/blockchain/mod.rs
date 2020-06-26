@@ -70,6 +70,9 @@ pub mod compact_filters;
 pub use self::compact_filters::CompactFiltersBlockchain;
 
 /// Capabilities that can be supported by an [`OnlineBlockchain`] backend
+pub mod bitcoin_rpc;
+pub use self::bitcoin_rpc::BitcoinRpcBlockchain;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
     /// Can recover the full history of a wallet and not only the set of currently spendable UTXOs
