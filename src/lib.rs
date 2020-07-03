@@ -33,6 +33,7 @@ pub extern crate bitcoin;
 extern crate log;
 pub extern crate miniscript;
 extern crate serde;
+
 #[macro_use]
 extern crate serde_json;
 
@@ -51,6 +52,11 @@ pub extern crate electrum_client;
 
 #[cfg(feature = "esplora")]
 pub extern crate reqwest;
+
+#[cfg(feature = "rpc")]
+pub extern crate bitcoincore_rpc;
+#[cfg(feature = "rpc")]
+pub use blockchain::rpc::RpcBlockchain;
 
 #[cfg(feature = "key-value-db")]
 pub extern crate sled;

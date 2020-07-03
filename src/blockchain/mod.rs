@@ -70,8 +70,10 @@ pub mod compact_filters;
 pub use self::compact_filters::CompactFiltersBlockchain;
 
 /// Capabilities that can be supported by an [`OnlineBlockchain`] backend
-pub mod bitcoin_rpc;
-pub use self::bitcoin_rpc::BitcoinRpcBlockchain;
+#[cfg(feature = "rpc")]
+pub mod rpc;
+#[cfg(feature = "rpc")]
+pub use self::rpc::RpcBlockchain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Capability {
