@@ -84,6 +84,7 @@ pub enum Error {
     CompactFilters(crate::blockchain::compact_filters::CompactFiltersError),
     #[cfg(feature = "rpc")]
     BitcoinRpc(bitcoincore_rpc::Error),
+    BitcoinRpcUnsupportedVersion,
     #[cfg(feature = "key-value-db")]
     Sled(sled::Error),
 }
