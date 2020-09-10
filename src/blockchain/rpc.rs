@@ -7,12 +7,13 @@ use bitcoin::{Address, Network, OutPoint, Transaction, Txid};
 use bitcoincore_rpc::{
     json::{
         ImportMultiOptions, ImportMultiRequest, ImportMultiRequestScriptPubkey,
-        ImportMultiRescanSince, ListTransactionResult,
+        ImportMultiRescanSince, ListTransactionResult, EstimateMode,
     },
     jsonrpc, Client, Error as RpcError, RpcApi,
 };
 
 use super::*;
+use crate::FeeRate;
 use crate::database::{BatchDatabase, BatchOperations, DatabaseUtils};
 use crate::error::Error;
 use crate::types::{ScriptType, TransactionDetails, UTXO};
@@ -41,14 +42,14 @@ impl RpcBlockchain {
     }
 
     fn index_is_synced<D: BatchDatabase + DatabaseUtils>(
-        &mut self,
+        &self,
         index: u32,
         database: &mut D,
     ) -> Result<bool, Error> {
         let last_script = database
             .get_script_pubkey_from_path(ScriptType::External, index)?
             .ok_or(Error::MissingScriptPubkey)?;
-        let config = self.0.as_mut().ok_or(Error::OfflineClient)?;
+        let config = self.0.as_ref().ok_or(Error::OfflineClient)?;
         let address = Address::from_script(&last_script, config.network).unwrap();
         let response = config.client.get_address_info(&address)?;
         // iswatchonly has never been optional: https://github.com/bitcoin/bitcoin/commit/b98bfc5ed0da1efef1eff552a7e1a7ce9caf130f#diff-df7d84ff2f53fcb2a0dc15a3a51e55ceR3691
@@ -58,7 +59,7 @@ impl RpcBlockchain {
     }
 
     fn needs_sync_or_rescan<D: BatchDatabase + DatabaseUtils>(
-        &mut self,
+        &self,
         database: &mut D,
     ) -> Result<(bool, bool), Error> {
         // TODO: batching
@@ -71,7 +72,7 @@ impl RpcBlockchain {
     }
 
     fn importmulti<D: BatchDatabase + DatabaseUtils>(
-        &mut self,
+        &self,
         rescan_since: Option<u64>,
         database: &mut D,
     ) -> Result<(), Error> {
@@ -81,7 +82,7 @@ impl RpcBlockchain {
         };
         // TODO: batching
         self.0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .client
             .import_multi(
@@ -102,7 +103,7 @@ impl RpcBlockchain {
     }
 
     fn list_transactions<D: BatchDatabase + DatabaseUtils>(
-        &mut self,
+        &self,
         database: &mut D,
     ) -> Result<Vec<(Transaction, Option<u32>)>, Error> {
         // Any height lower than "buried_height" is "settled"
@@ -130,7 +131,7 @@ impl RpcBlockchain {
             // Fetch next chunk of transactions
             let wallet_txs_chunk = self
                 .0
-                .as_mut()
+                .as_ref()
                 .ok_or(Error::OfflineClient)?
                 .client
                 .list_transactions(None, Some(ltx_count), Some(ltx_skip), Some(true))?;
@@ -169,7 +170,7 @@ impl RpcBlockchain {
         for wallet_tx in &wallet_txs {
             let tx = self
                 .0
-                .as_mut()
+                .as_ref()
                 .ok_or(Error::OfflineClient)?
                 .client
                 .get_transaction(&wallet_tx.info.txid, Some(true))?
@@ -183,7 +184,7 @@ impl RpcBlockchain {
             let height = match wallet_tx.info.blockhash {
                 Some(blockhash) => Some(
                     self.0
-                        .as_mut()
+                        .as_ref()
                         .ok_or(Error::OfflineClient)?
                         .client
                         .get_block_info(&blockhash)?
@@ -218,12 +219,12 @@ impl OnlineBlockchain for RpcBlockchain {
     }
 
     fn setup<D: BatchDatabase + DatabaseUtils, P: Progress>(
-        &mut self,
+        &self,
         _stop_gap: Option<usize>,
         _database: &mut D,
         _progress_update: P,
     ) -> Result<(), Error> {
-        let config = self.0.as_mut().ok_or(Error::OfflineClient)?;
+        let config = self.0.as_ref().ok_or(Error::OfflineClient)?;
 
         // Check we support their node (rust-bitcoincore-rpc supports 0.18.0 and up)
         let version = config.client.version()?;
@@ -265,7 +266,7 @@ impl OnlineBlockchain for RpcBlockchain {
     }
 
     fn sync<D: BatchDatabase + DatabaseUtils, P: Progress>(
-        &mut self,
+        &self,
         _stop_gap: Option<usize>,
         database: &mut D,
         _progress_update: P,
@@ -275,7 +276,7 @@ impl OnlineBlockchain for RpcBlockchain {
         let (needs_sync_or_rescan, needs_rescan) = self.needs_sync_or_rescan(database)?;
         if needs_sync_or_rescan {
             if needs_rescan {
-                let rescan_since = self.0.as_mut().ok_or(Error::OfflineClient)?.rescan_since;
+                let rescan_since = self.0.as_ref().ok_or(Error::OfflineClient)?.rescan_since;
                 self.importmulti(Some(rescan_since), database)?;
             } else {
                 self.importmulti(None, database)?;
@@ -307,6 +308,7 @@ impl OnlineBlockchain for RpcBlockchain {
                     updates.set_utxo(&UTXO {
                         outpoint: OutPoint::new(tx.txid(), i as u32),
                         txout: output.clone(),
+                        is_internal: true,
                     })?;
                     received += output.value;
                 }
@@ -320,6 +322,7 @@ impl OnlineBlockchain for RpcBlockchain {
                 received,
                 sent,
                 timestamp: 0,
+                fees: 0 as u64,        // TODO: Fixme!!!!
             };
             debug!("Saving tx: {}", tx.clone().txid());
             updates.set_tx(&details)?;
@@ -331,10 +334,10 @@ impl OnlineBlockchain for RpcBlockchain {
         Ok(())
     }
 
-    fn get_tx(&mut self, txid: &Txid) -> Result<Option<Transaction>, Error> {
+    fn get_tx(&self, txid: &Txid) -> Result<Option<Transaction>, Error> {
         let response = self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .client
             .get_transaction(txid, Some(true))?;
@@ -342,23 +345,38 @@ impl OnlineBlockchain for RpcBlockchain {
         Ok(Some(tx))
     }
 
-    fn broadcast(&mut self, tx: &Transaction) -> Result<(), Error> {
+    fn broadcast(&self, tx: &Transaction) -> Result<(), Error> {
         self.0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .client
             .send_raw_transaction(tx)?;
         Ok(())
     }
 
-    fn get_height(&mut self) -> Result<usize, Error> {
+    fn get_height(&self) -> Result<u32, Error> {
         let info = self
             .0
-            .as_mut()
+            .as_ref()
             .ok_or(Error::OfflineClient)?
             .client
             .get_blockchain_info()?;
-        Ok(info.blocks as usize)
+        Ok(info.blocks as u32)
+    }
+
+    fn estimate_fee(&self, target: usize) -> Result<FeeRate, Error> {
+        Ok(FeeRate::from_btc_per_kvb(
+            self
+            .0
+            .as_ref()
+            .ok_or(Error::OfflineClient)?
+            .client
+            .estimate_smart_fee(target as u16, Some(EstimateMode::Conservative))?
+            .fee_rate
+            .unwrap()
+            .as_sat()
+            as f32
+        ))
     }
 }
 

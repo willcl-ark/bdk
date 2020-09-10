@@ -159,7 +159,7 @@ pub trait BatchDatabase: Database {
     fn commit_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
 }
 
-pub(crate) trait DatabaseUtils: Database {
+pub trait DatabaseUtils: Database {
     fn is_mine(&self, script: &Script) -> Result<bool, Error> {
         self.get_path_from_script_pubkey(script)
             .map(|o| o.is_some())
